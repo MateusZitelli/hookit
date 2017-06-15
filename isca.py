@@ -17,7 +17,6 @@ except ImportError:
     from urllib2 import urlopen, Request, HTTPError
 
 from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
-import SocketServer
 
 
 class S(BaseHTTPRequestHandler):
@@ -34,7 +33,9 @@ class S(BaseHTTPRequestHandler):
         self._set_headers()
 
     def do_POST(self):
-        # Doesn't do anything with posted data
+        content_length = int(self.headers['Content-Length'])
+        post_data = self.rfile.read(content_length)
+        print(post_data)
         self._set_headers()
         self.wfile.write("<html><body><h1>POST!</h1></body></html>")
 
