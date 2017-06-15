@@ -4,6 +4,8 @@ import os
 import json
 import argparse
 import logging
+import random
+import sys
 
 try:
     from urllib.parse import urlparse, urlencode, urljoin, urlsplit
@@ -14,11 +16,33 @@ except ImportError:
     from urllib import urlencode
     from urllib2 import urlopen, Request, HTTPError
 
-FORMAT = """\033[94m%(asctime)s\033[0m - \033[94m%(name)s\033[0m -\
- \033[94m%(levelname)s\033[0m - \033[32m%(message)s\033[0m"""
+from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
+import SocketServer
 
-logging.basicConfig(level=logging.INFO, format=FORMAT)
-logger = logging.getLogger(__name__)
+
+class S(BaseHTTPRequestHandler):
+    def _set_headers(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/html')
+        self.end_headers()
+
+    def do_GET(self):
+        self._set_headers()
+        self.wfile.write("<html><body><h1>hi!</h1></body></html>")
+
+    def do_HEAD(self):
+        self._set_headers()
+
+    def do_POST(self):
+        # Doesn't do anything with posted data
+        self._set_headers()
+        self.wfile.write("<html><body><h1>POST!</h1></body></html>")
+
+
+def run_server(server_class=HTTPServer, handler_class=S, port=80):
+    server_address = ('', port)
+    httpd = server_class(server_address, handler_class)
+    httpd.serve_forever()
 
 GITHUB_API_URL = "https://api.github.com/"
 
@@ -38,10 +62,13 @@ class Isca():
                 "info_type": str}
         })
         self.create_hook(info)
-        # self.create_server()
+        self.start_server(info)
 
     def create_hook(self, info):
         url = info['CALLBACK_URL']
+        repository_name = info['REPOSITORY_NAME']
+        access_token = info['GITHUB_ACCESS_TOKEN']
+
         payload = {
             "name": "web",
             "active": True,
@@ -50,12 +77,24 @@ class Isca():
             ],
             "config": {
                 "url": url,
-                "content_type": "json"
+                "content_type": "json",
+                "secret": random.getrandbits(128)
             }
         }
-        hooks_url = get_repo_hooks_url(info['REPOSITORY_NAME'])
-        response = post(hooks_url, payload, info['GITHUB_ACCESS_TOKEN'])
-        print(response)
+
+        hooks_url = get_repo_hooks_url(repository_name)
+        response = post(hooks_url, payload, access_token)
+        hook_id = response['id']
+
+        logger.info("Webhook for %s created with id %s" %
+                    (repository_name, hook_id, ))
+
+    def start_server(self, info):
+        url_info = urlparse(info['CALLBACK_URL'])
+        port = url_info.port
+        if port is None:
+            port = 80 if url_info.scheme == 'http' else 443
+        run_server(port=port)
 
 
 def post(url, payload, token):
@@ -65,11 +104,15 @@ def post(url, payload, token):
     header = {'Content-Type': 'application/json',
               'Content-Length': clen,
               'Authorization': 'token %s' % (token,)}
-    req = Request(url, data, header)
-    f = urlopen(req)
-    response = f.read()
-    f.close()
-    return response
+    try:
+        req = Request(url, data, header)
+        f = urlopen(req)
+        response = f.read()
+        f.close()
+        return json.loads(response)
+    except HTTPError as e:
+        error_response = json.loads(e.read())
+        logger.exception(error_response['errors'][0]['message'])
 
 
 def get_repo_hooks_url(repository_name):
@@ -124,6 +167,68 @@ def retrieve_info(schema):
 
     return info_vars
 
+
+class ColorfulFormater(logging.Formatter):
+    err_fmt  = """\033[94m%(asctime)s\033[0m - \033[94m%(name)s\033[0m -\
+ \033[41m%(levelname)s\033[0m - \033[31m%(message)s\033[0m"""
+    dbg_fmt  = """\033[94m%(asctime)s\033[0m - \033[94m%(name)s\033[0m -\
+ \033[94m%(levelname)s\033[0m - \033[32m%(message)s\033[0m"""
+    info_fmt = """\033[94m%(asctime)s\033[0m - \033[94m%(name)s\033[0m -\
+ \033[94m%(levelname)s\033[0m - \033[32m%(message)s\033[0m"""
+
+    def __init__(self):
+        FORMAT = """\033[94m%(asctime)s\033[0m - \033[94m%(name)s\033[0m -\
+ \033[94m%(levelname)s\033[0m - \033[32m%(message)s\033[0m"""
+        logging.Formatter.__init__(self, FORMAT)
+
+    def format(self, record):
+
+        # Save the original format configured by the user
+        # when the logger formatter was instantiated
+        format_orig = None
+        has_style = hasattr(self, '_style')
+        if has_style:
+            format_orig = self._style._fmt
+        else:
+            format_orig = self._fmt
+
+        # Replace the original format with one customized by logging level
+        if record.levelno == logging.DEBUG:
+            if has_style:
+                self._style._fmt = ColorfulFormater.dbg_fmt
+            else:
+                self._fmt = ColorfulFormater.dbg_fmt
+
+        elif record.levelno == logging.INFO:
+            if has_style:
+                self._style._fmt = ColorfulFormater.info_fmt
+            else:
+                self._fmt = ColorfulFormater.info_fmt
+
+        elif record.levelno == logging.ERROR:
+            if has_style:
+                self._style._fmt = ColorfulFormater.err_fmt
+            else:
+                self._fmt = ColorfulFormater.err_fmt
+
+        # Call the original formatter class to do the grunt work
+        result = logging.Formatter.format(self, record)
+
+        # Restore the original format configured by the user
+        if has_style:
+            self._style._fmt = format_orig
+        else:
+            self._fmt = format_orig
+
+        return result
+
+
+handler = logging.StreamHandler(sys.stdout)
+handler.setFormatter(ColorfulFormater())
+logging.root.addHandler(handler)
+logging.root.setLevel(logging.DEBUG)
+logger = logging.getLogger(__name__)
+
+
 if __name__ == "__main__":
     Isca()
-
