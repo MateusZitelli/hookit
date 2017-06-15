@@ -4,8 +4,9 @@ import os
 import json
 import argparse
 import logging
-import random
 import sys
+import hashlib
+import hmac
 
 try:
     from urllib.parse import urlparse, urlencode, urljoin, urlsplit
@@ -18,56 +19,27 @@ except ImportError:
     from urllib2 import urlopen, Request, HTTPError
     from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
 
-
-class S(BaseHTTPRequestHandler):
-    def _set_headers(self):
-        self.send_response(200)
-        self.send_header('Content-type', 'text/html')
-        self.end_headers()
-
-    def do_GET(self):
-        self._set_headers()
-        self.wfile.write("<html><body><h1>hi!</h1></body></html>")
-
-    def do_HEAD(self):
-        self._set_headers()
-
-    def do_POST(self):
-        content_length = int(self.headers['Content-Length'])
-        post_data = self.rfile.read(content_length)
-        print(post_data)
-        self._set_headers()
-        self.wfile.write("<html><body><h1>POST!</h1></body></html>")
-
-
-def run_server(server_class=HTTPServer, handler_class=S, host='', port=80):
-    server_address = (host, port)
-    httpd = server_class(server_address, handler_class)
-    httpd.serve_forever()
-
 GITHUB_API_URL = "https://api.github.com/"
 
 
-class Isca():
+class Hookit():
     """ Generic auto hooker for GitHub """
     def __init__(self):
         info = retrieve_info({
             'GITHUB_ACCESS_TOKEN': {
-                "description": 'GitHub Access Token',
-                "info_type": str},
+                "description": 'GitHub Access Token' },
             'REPOSITORY_NAME': {
-                "description": 'Repository name',
-                "info_type": str},
+                "description": 'Repository name' },
+            'HOOK_SECRET': {
+                "description": 'Hook secret' },
             'CALLBACK_URL': {
-                "description": 'Callback URL',
-                "info_type": str},
-            'ON_START': {
-                "description": 'Repository name',
-                "info_type": str},
-            'ON_FINISH': {
-                "description": 'Callback URL',
-                "info_type": str}
+                "description": 'Callback URL' },
+            'AFTER_PUSH': {
+                "description": 'After push script' },
+            'BEFORE_PUSH': {
+                "description": 'Before push script' }
         })
+
         self.create_hook(info)
         self.start_server(info)
 
@@ -75,6 +47,7 @@ class Isca():
         url = info['CALLBACK_URL']
         repository_name = info['REPOSITORY_NAME']
         access_token = info['GITHUB_ACCESS_TOKEN']
+        hook_secret = info['HOOK_SECRET']
 
         payload = {
             "name": "web",
@@ -85,11 +58,11 @@ class Isca():
             "config": {
                 "url": url,
                 "content_type": "json",
-                "secret": random.getrandbits(128)
+                "secret": hook_secret
             }
         }
 
-        hooks_url = get_repo_hooks_url(repository_name)
+        hooks_url = GITHUB_API_URL + "repos/" + repository_name + "/hooks"
         response = post(hooks_url, payload, access_token)
         hook_id = response['id']
 
@@ -101,8 +74,33 @@ class Isca():
         port = url_info.port
         if port is None:
             port = 80 if url_info.scheme == 'http' else 443
-        print(url_info.hostname)
-        run_server(host=url_info.hostname, port=port)
+
+        host = url_info.hostname
+        server_address = (host, port)
+        httpd = HTTPServer(server_address, self.gen_request_handler(info))
+        httpd.serve_forever()
+
+    def gen_request_handler(self, info):
+        class S(BaseHTTPRequestHandler):
+            def _set_headers(self):
+                self.send_response(200)
+                self.send_header('Content-type', 'text/html')
+                self.end_headers()
+
+            def do_POST(self):
+                content_length = int(self.headers['Content-Length'])
+                received_signature = self.headers['X-Hub-Signature']
+                post_data = self.rfile.read(content_length)
+
+                sha1 = hashlib.sha1()
+                sha1.update(info['HOOK_SECRET'])
+                sha1.update(post_data)
+                signature = 'sha1=' + sha1.digest()
+
+                print(received_signature, signature,
+                      hmac.compare_digest(received_signature, signature))
+                self._set_headers()
+        return S
 
 
 def post(url, payload, token):
@@ -121,10 +119,6 @@ def post(url, payload, token):
     except HTTPError as e:
         error_response = json.loads(e.read())
         logger.exception(error_response['errors'][0]['message'])
-
-
-def get_repo_hooks_url(repository_name):
-    return GITHUB_API_URL + "repos/" + repository_name + "/hooks"
 
 
 def retrieve_info(schema):
@@ -231,6 +225,9 @@ class ColorfulFormater(logging.Formatter):
         return result
 
 
+
+
+
 handler = logging.StreamHandler(sys.stdout)
 handler.setFormatter(ColorfulFormater())
 logging.root.addHandler(handler)
@@ -239,4 +236,4 @@ logger = logging.getLogger(__name__)
 
 
 if __name__ == "__main__":
-    Isca()
+    Hookit()
