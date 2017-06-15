@@ -11,12 +11,12 @@ try:
     from urllib.parse import urlparse, urlencode, urljoin, urlsplit
     from urllib.request import urlopen, Request
     from urllib.error import HTTPError
+    from http.server import BaseHTTPRequestHandler, HTTPServer
 except ImportError:
     from urlparse import urlparse, urljoin, urlsplit
     from urllib import urlencode
     from urllib2 import urlopen, Request, HTTPError
-
-from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
+    from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
 
 
 class S(BaseHTTPRequestHandler):
@@ -59,6 +59,12 @@ class Isca():
                 "description": 'Repository name',
                 "info_type": str},
             'CALLBACK_URL': {
+                "description": 'Callback URL',
+                "info_type": str},
+            'ON_START': {
+                "description": 'Repository name',
+                "info_type": str},
+            'ON_FINISH': {
                 "description": 'Callback URL',
                 "info_type": str}
         })
