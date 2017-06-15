@@ -7,6 +7,7 @@ import logging
 import sys
 import hashlib
 import hmac
+import subprocess
 
 try:
     from urllib.parse import urlparse, urlencode, urljoin, urlsplit
@@ -81,10 +82,11 @@ class Hookit():
         httpd.serve_forever()
 
     def gen_request_handler(self, info):
+        hookit = self
+
         class S(BaseHTTPRequestHandler):
-            def _set_headers(self):
-                self.send_response(200)
-                self.send_header('Content-type', 'text/html')
+            def _set_headers(self, status=200):
+                self.send_response(status)
                 self.end_headers()
 
             def do_POST(self):
@@ -92,24 +94,35 @@ class Hookit():
                 received_signature = self.headers['X-Hub-Signature']
                 post_data = self.rfile.read(content_length)
 
-                sha1 = hashlib.sha1()
-                sha1.update(info['HOOK_SECRET'])
-                sha1.update(post_data)
-                signature = 'sha1=' + sha1.digest()
+                sha1 = hmac.new(info['HOOK_SECRET'], post_data, hashlib.sha1)
+                signature = 'sha1=' + sha1.hexdigest()
+                signs_match = hmac.compare_digest(received_signature,
+                                                  signature)
 
-                print(received_signature, signature,
-                      hmac.compare_digest(received_signature, signature))
-                self._set_headers()
+                if signs_match:
+                    self._set_headers(200)
+                    hookit.pull_or_clone(info)
+                else:
+                    self._set_headers(401)
         return S
+
+    def pull_or_clone(self, info):
+        subprocess.call(['git', 'clone',
+                        'https://%s@github.com/%s' % (
+                            info['GITHUB_ACCESS_TOKEN'],
+                            info['REPOSITORY_NAME'],)])
 
 
 def post(url, payload, token):
     logging.debug("POST %s" % (url, ))
     data = json.dumps(payload).encode('utf-8')
     clen = len(data)
-    header = {'Content-Type': 'application/json',
-              'Content-Length': clen,
-              'Authorization': 'token %s' % (token,)}
+    header = {
+        'Content-Type': 'application/json',
+        'Content-Length': clen,
+        'Authorization': 'token %s' % (token,)
+    }
+
     try:
         req = Request(url, data, header)
         f = urlopen(req)
@@ -225,15 +238,11 @@ class ColorfulFormater(logging.Formatter):
         return result
 
 
-
-
-
 handler = logging.StreamHandler(sys.stdout)
 handler.setFormatter(ColorfulFormater())
 logging.root.addHandler(handler)
 logging.root.setLevel(logging.DEBUG)
 logger = logging.getLogger(__name__)
-
 
 if __name__ == "__main__":
     Hookit()
