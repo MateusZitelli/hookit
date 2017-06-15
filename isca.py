@@ -39,8 +39,8 @@ class S(BaseHTTPRequestHandler):
         self.wfile.write("<html><body><h1>POST!</h1></body></html>")
 
 
-def run_server(server_class=HTTPServer, handler_class=S, port=80):
-    server_address = ('', port)
+def run_server(server_class=HTTPServer, handler_class=S, host='', port=80):
+    server_address = (host, port)
     httpd = server_class(server_address, handler_class)
     httpd.serve_forever()
 
@@ -94,7 +94,8 @@ class Isca():
         port = url_info.port
         if port is None:
             port = 80 if url_info.scheme == 'http' else 443
-        run_server(port=port)
+        print(url_info.hostname)
+        run_server(host=url_info.hostname, port=port)
 
 
 def post(url, payload, token):
