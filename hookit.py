@@ -63,11 +63,18 @@ class Hookit():
         }
 
         hooks_url = GITHUB_API_URL + "repos/" + repository_name + "/hooks"
-        response = post(hooks_url, payload, access_token)
-        hook_id = response['id']
-
-        logger.info("Webhook for %s created with id %s" %
-                    (repository_name, hook_id, ))
+        try:
+            response = post(hooks_url, payload, access_token)
+            hook_id = response['id']
+            logger.info("Webhook for %s created with id %s" %
+                        (repository_name, hook_id, ))
+        except HTTPError as e:
+            error_response = json.loads(e.read())
+            if e.code == 422:
+                logger.warning(error_response['errors'][0]['message'])
+            else:
+                logger.error(error_response['message'])
+                raise
 
     def start_server(self, info):
         url_info = urlparse(info['CALLBACK_URL'])
@@ -132,15 +139,11 @@ def post(url, payload, token):
         'Authorization': 'token %s' % (token,)
     }
 
-    try:
-        req = Request(url, data, header)
-        f = urlopen(req)
-        response = f.read()
-        f.close()
-        return json.loads(response)
-    except HTTPError as e:
-        error_response = json.loads(e.read())
-        logger.exception(error_response['errors'][0]['message'])
+    req = Request(url, data, header)
+    f = urlopen(req)
+    response = f.read()
+    f.close()
+    return json.loads(response)
 
 
 def retrieve_info(schema):
@@ -196,7 +199,7 @@ class ColorfulFormater(logging.Formatter):
     err_fmt  = """\033[94m%(asctime)s\033[0m - \033[94m%(name)s\033[0m -\
  \033[41m%(levelname)s\033[0m - \033[31m%(message)s\033[0m"""
     war_fmt  = """\033[94m%(asctime)s\033[0m - \033[94m%(name)s\033[0m -\
- \033[41m%(levelname)s\033[0m - \033[31m%(message)s\033[0m"""
+ \033[45m%(levelname)s\033[0m - \033[31m%(message)s\033[0m"""
     dbg_fmt  = """\033[94m%(asctime)s\033[0m - \033[94m%(name)s\033[0m -\
  \033[94m%(levelname)s\033[0m - \033[32m%(message)s\033[0m"""
     info_fmt = """\033[94m%(asctime)s\033[0m - \033[94m%(name)s\033[0m -\
