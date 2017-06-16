@@ -8,6 +8,7 @@ import sys
 import hashlib
 import hmac
 import subprocess
+import shlex
 
 try:
     from urllib.parse import urlparse, urlencode, urljoin, urlsplit
@@ -35,10 +36,8 @@ class Hookit():
                 "description": 'Hook secret' },
             'CALLBACK_URL': {
                 "description": 'Callback URL' },
-            'AFTER_PUSH': {
-                "description": 'After push script' },
-            'BEFORE_PUSH': {
-                "description": 'Before push script' }
+            'ON_PUSH_CALL': {
+                "description": 'On push command' }
         })
 
         self.create_hook(info)
@@ -79,6 +78,7 @@ class Hookit():
         host = url_info.hostname
         server_address = (host, port)
         httpd = HTTPServer(server_address, self.gen_request_handler(info))
+        logger.info("Listening to POSTs at %s" % (info['CALLBACK_URL']))
         httpd.serve_forever()
 
     def gen_request_handler(self, info):
@@ -91,26 +91,35 @@ class Hookit():
 
             def do_POST(self):
                 content_length = int(self.headers['Content-Length'])
+                client_address = self.client_address[0]
+                if 'X-Hub-Signature' not in self.headers:
+                    logger.warning("POST without signature from %s" %
+                                   (client_address,))
+                    return
                 received_signature = self.headers['X-Hub-Signature']
                 post_data = self.rfile.read(content_length)
 
                 sha1 = hmac.new(info['HOOK_SECRET'], post_data, hashlib.sha1)
                 signature = 'sha1=' + sha1.hexdigest()
-                signs_match = hmac.compare_digest(received_signature,
-                                                  signature)
+                signatures_match = hmac.compare_digest(received_signature,
+                                                       signature)
 
-                if signs_match:
+                if signatures_match:
                     self._set_headers(200)
-                    hookit.pull_or_clone(info)
+                    logger.info("Valid POST from %s" % (client_address,))
+                    hookit.on_push_call(info)
                 else:
                     self._set_headers(401)
+                    logger.warning("POST with wrong signature from %s" %
+                                   (client_address,))
         return S
 
-    def pull_or_clone(self, info):
-        subprocess.call(['git', 'clone',
-                        'https://%s@github.com/%s' % (
-                            info['GITHUB_ACCESS_TOKEN'],
-                            info['REPOSITORY_NAME'],)])
+    def on_push_call(self, info):
+        subprocess.call(shlex.split(info['ON_PUSH_CALL']))
+
+
+def get_repo_path(repo_name):
+    return repo_name.split('/')[-1]
 
 
 def post(url, payload, token):
@@ -186,6 +195,8 @@ def retrieve_info(schema):
 class ColorfulFormater(logging.Formatter):
     err_fmt  = """\033[94m%(asctime)s\033[0m - \033[94m%(name)s\033[0m -\
  \033[41m%(levelname)s\033[0m - \033[31m%(message)s\033[0m"""
+    war_fmt  = """\033[94m%(asctime)s\033[0m - \033[94m%(name)s\033[0m -\
+ \033[41m%(levelname)s\033[0m - \033[31m%(message)s\033[0m"""
     dbg_fmt  = """\033[94m%(asctime)s\033[0m - \033[94m%(name)s\033[0m -\
  \033[94m%(levelname)s\033[0m - \033[32m%(message)s\033[0m"""
     info_fmt = """\033[94m%(asctime)s\033[0m - \033[94m%(name)s\033[0m -\
@@ -225,6 +236,12 @@ class ColorfulFormater(logging.Formatter):
                 self._style._fmt = ColorfulFormater.err_fmt
             else:
                 self._fmt = ColorfulFormater.err_fmt
+
+        elif record.levelno == logging.WARNING:
+            if has_style:
+                self._style._fmt = ColorfulFormater.war_fmt
+            else:
+                self._fmt = ColorfulFormater.war_fmt
 
         # Call the original formatter class to do the grunt work
         result = logging.Formatter.format(self, record)
