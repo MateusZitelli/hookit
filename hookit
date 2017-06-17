@@ -83,7 +83,7 @@ class Hookit():
             port = 80 if url_info.scheme == 'http' else 443
 
         host = url_info.hostname
-        server_address = (host, port)
+        server_address = ('0.0.0.0', port)
         httpd = HTTPServer(server_address, self.gen_request_handler(info))
         logger.info("Listening to POSTs at %s" % (info['CALLBACK_URL']))
         httpd.serve_forever()
@@ -106,7 +106,8 @@ class Hookit():
                 received_signature = self.headers['X-Hub-Signature']
                 post_data = self.rfile.read(content_length)
 
-                sha1 = hmac.new(info['HOOK_SECRET'], post_data, hashlib.sha1)
+                sha1 = hmac.new(info['HOOK_SECRET'].encode('utf-8'),
+                                post_data, hashlib.sha1)
                 signature = 'sha1=' + sha1.hexdigest()
                 signatures_match = hmac.compare_digest(received_signature,
                                                        signature)
