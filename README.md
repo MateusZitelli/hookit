@@ -1,8 +1,10 @@
-# Hookit
-
-> WebHooks as easy as it can get
-
+<h1 align="center">
+Hookit
+<br/>
+<i>WebHooks as easy as it can get</i>
+<br/>
 <img width=150 src="https://cdn.rawgit.com/MateusZitelli/hookit/9f57d2aaac0eb2903d941f35a34b27edf773cf94/assets/logo.svg" ></img>
+</h1>
 
 Hookit automatically creates and listens to GitHub WebHooks, running a specified command after push events.
 
